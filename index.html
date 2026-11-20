@@ -149,7 +149,7 @@ const GLOSS = [{"en": "Myeongsim Bogam (明心寶鑑)", "ko": "명심보감", "d
 const store={get(k,d){try{const v=localStorage.getItem('msbg_'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},
   set(k,v){try{localStorage.setItem('msbg_'+k,JSON.stringify(v))}catch(e){}}};
 let favs=new Set(store.get('favs',[]));
-let S=Object.assign({fs:1,showH:true,showR:true,showS:true,showZ:true,study:false,rate:0.95,lang:'ko'},store.get('set',{}));
+let S=Object.assign({fs:1,showH:true,showR:true,showS:true,showZ:true,study:false,rate:0.95,pitch:1,voiceKo:'',voiceEn:'',lang:'ko'},store.get('set',{}));
 const EN=()=>S.lang==='en', KO=()=>S.lang!=='en', BOTH=()=>S.lang==='both';
 // UI text: ko / en
 const L=(ko,en)=>EN()?en:ko;
@@ -162,7 +162,8 @@ let Q=[],qi=0,curU=null,playing=null,chainCh=null;
 function chunks(s){s=String(s||'').replace(/\s+/g,' ').trim();if(!s)return[];const out=[];let cur='';
   s.replace(/([.!?。…"”])\s+/g,'$1\n').replace(/(,)\s+/g,'$1\n').split('\n').forEach(p=>{if((cur+' '+p).length>160&&cur){out.push(cur);cur=p}else cur=cur?cur+' '+p:p});if(cur)out.push(cur);
   return out.flatMap(c=>c.length>220?c.match(/.{1,200}(\s|$)/g):[c])}
-function pickVoice(lang){try{const vs=speechSynthesis.getVoices();return vs.find(v=>v.lang&&v.lang.replace('_','-').toLowerCase().startsWith(lang.toLowerCase()))||null}catch(e){return null}}
+function voicesFor(lang){try{return speechSynthesis.getVoices().filter(v=>v.lang&&v.lang.replace('_','-').toLowerCase().startsWith(lang))}catch(e){return[]}}
+function pickVoice(lang){try{const want=lang=='ko'?S.voiceKo:S.voiceEn;if(want){const m=voicesFor(lang).find(v=>v.voiceURI===want||v.name===want);if(m)return m}const vs=speechSynthesis.getVoices();return vs.find(v=>v.lang&&v.lang.replace('_','-').toLowerCase().startsWith(lang.toLowerCase()))||null}catch(e){return null}}
 function itemParts(ci,ii){const it=BOOK[ci].items[ii],P=[];const ko=(s)=>chunks(s).forEach(x=>P.push({t:x,l:'ko-KR'})),en=(s)=>chunks(s).forEach(x=>P.push({t:x,l:'en-US'}));
   if(KO()){ko(it.r);ko(it.k);if(S.showZ&&it.z){ko('현대적 풀이. '+it.z);ko('예를 들면, '+it.x)}}
   if(EN()||BOTH()){en(it.e);if(S.showZ&&it.ze){en('In modern terms: '+it.ze);en('For example, '+it.xe)}}
@@ -173,10 +174,17 @@ function markPlaying(k){document.querySelectorAll('.say.on').forEach(b=>{b.class
   const c=document.getElementById('p'+k);if(c){c.classList.add('speaking');if(chainCh!=null)c.scrollIntoView({block:'center',behavior:'smooth'})}
   const [ci,ii]=k.split('-').map(Number);$('#ttstxt').textContent='🔊 '+where(ci,ii);$('#ttsstop').textContent='⏹ '+L('멈춤','Stop');$('#ttsbar').classList.add('on')}
 function speakNext(){if(qi>=Q.length){const k=playing;if(chainCh!=null&&k){const [ci,ii]=k.split('-').map(Number);if(ii+1<BOOK[ci].items.length){startItem(ci,ii+1,true);return}}ttsStop();return}
-  const p=Q[qi++];const u=new SpeechSynthesisUtterance(p.t);u.lang=p.l;const v=pickVoice(p.l.slice(0,2));if(v)u.voice=v;u.rate=S.rate||0.95;
+  const p=Q[qi++];const u=new SpeechSynthesisUtterance(p.t);u.lang=p.l;const v=pickVoice(p.l.slice(0,2));if(v)u.voice=v;u.rate=S.rate||0.95;u.pitch=S.pitch||1;
   u.onend=()=>{if(curU===u)speakNext()};u.onerror=(e)=>{if(curU===u&&e.error!=='interrupted'&&e.error!=='canceled')speakNext()};curU=u;speechSynthesis.speak(u)}
 function startItem(ci,ii,keepChain){if(!keepChain)chainCh=null;try{speechSynthesis.cancel()}catch(e){}Q=itemParts(ci,ii);qi=0;playing=ci+'-'+ii;markPlaying(playing);speakNext()}
-if(TTS){try{speechSynthesis.getVoices();speechSynthesis.onvoiceschanged=()=>{}}catch(e){}}
+if(TTS){try{speechSynthesis.getVoices();speechSynthesis.onvoiceschanged=()=>{if((location.hash||'').startsWith('#/set')&&!document.activeElement.matches('select'))route()}}catch(e){}}
+function sample(lang){try{speechSynthesis.cancel()}catch(e){}const txt=lang=='ko'?'인일시지분이면 면백일지우니라. 한때의 분함을 참으면 백 날의 근심을 면한다.':'Endure one moment of anger, and you will spare yourself a hundred days of sorrow.';
+  const u=new SpeechSynthesisUtterance(txt);u.lang=lang=='ko'?'ko-KR':'en-US';const v=pickVoice(lang);if(v)u.voice=v;u.rate=S.rate||0.95;u.pitch=S.pitch||1;curU=u;speechSynthesis.speak(u)}
+function voiceSel(lang){const vs=voicesFor(lang);const cur=lang=='ko'?S.voiceKo:S.voiceEn;
+  if(!vs.length)return `<small>${L('이 기기에서 찾은 목소리가 없습니다. 아래 안내대로 목소리를 내려받아 주세요.','No voices found on this device. See the tips below to download one.')}</small>`;
+  return `<select data-voice="${lang}" style="font:inherit;padding:8px;border-radius:10px;border:1px solid var(--line);background:#fffdf6;max-width:100%">
+   <option value="">${L('기본 목소리','Default voice')}</option>${vs.map(v=>`<option value="${esc(v.voiceURI||v.name)}" ${cur===(v.voiceURI||v.name)?'selected':''}>${esc(v.name)}${v.localService===false?L(' (인터넷 필요)',' (online)'):''}</option>`).join('')}</select>
+   <button class="say" data-sample="${lang}" style="margin:0 0 0 6px">🔊 ${L('미리 듣기','Preview')}</button>`}
 const ALL=[];BOOK.forEach((c,ci)=>c.items.forEach((it,ii)=>ALL.push({ci,ii,it})));
 const SOK=[];ALL.forEach(x=>(x.it.s||[]).forEach(s=>SOK.push(s)));
 const id=(ci,ii)=>ci+'-'+ii;
@@ -248,6 +256,10 @@ set(){const sw=(k,ko,en,sub)=>`<div class="opt"><div class="t"><b>${L(ko,en)}</b
   <div class="opt"><div class="t"><b>${L('글씨 크기','Text size')}</b></div>
    <div class="seg" id="fsSeg">${[[0.9,L('작게','S')],[1,L('보통','M')],[1.2,L('크게','L')],[1.4,L('아주 크게','XL')]].map(([v,l])=>`<button data-fs="${v}" class="${S.fs==v?'on':''}">${l}</button>`).join('')}</div></div>
   ${TTS?`<div class="opt"><div class="t"><b>${L('읽는 속도','Reading speed')}</b><small>${L('🔊 듣기 버튼으로 구절을 읽어 줍니다','Tap 🔊 Listen to hear a saying read aloud')}</small></div><div class="seg">${[[0.75,L('느리게','Slow')],[0.95,L('보통','Normal')],[1.2,L('빠르게','Fast')]].map(([v,l])=>`<button data-rate="${v}" class="${S.rate==v?'on':''}">${l}</button>`).join('')}</div></div>`:''}
+  ${TTS?`<div class="opt"><div class="t"><b>${L('목소리 높낮이','Voice pitch')}</b></div><div class="seg">${[[0.8,L('낮게','Low')],[1,L('보통','Normal')],[1.2,L('높게','High')]].map(([v,l])=>`<button data-pitch="${v}" class="${S.pitch==v?'on':''}">${l}</button>`).join('')}</div></div>
+  <div class="opt" style="display:block"><div class="t"><b>${L('한국어 목소리','Korean voice')}</b></div><div style="margin-top:8px;display:flex;align-items:center;flex-wrap:wrap;gap:6px">${voiceSel('ko')}</div></div>
+  <div class="opt" style="display:block"><div class="t"><b>${L('영어 목소리','English voice')}</b></div><div style="margin-top:8px;display:flex;align-items:center;flex-wrap:wrap;gap:6px">${voiceSel('en')}</div></div>
+  <div class="card note">${L('<b>더 자연스러운 목소리 내려받기</b><br>• 아이폰: 설정 → 손쉬운 사용 → 읽기 및 말하기 → 음성 → 한국어 → "고품질" 또는 "향상된" 목소리 내려받기<br>• 갤럭시: 설정 → 일반 → 텍스트 음성 변환 → 기본 엔진을 "Google 음성 인식 및 합성"으로 바꾼 뒤 ⚙ → 음성 데이터 설치 → 한국어 → 마음에 드는 목소리 선택<br>내려받은 뒤 이 앱을 닫았다 다시 열면 목록에 나타납니다.','<b>Get more natural voices</b><br>• iPhone: Settings → Accessibility → Spoken Content → Voices → English → download an "Enhanced" or "Premium" voice<br>• Android: Settings → General management → Text-to-speech → choose Google engine → ⚙ → Install voice data<br>Then close and reopen this app.')}</div>`:''}
   ${sw('showH','한자 원문 보이기','Show original Chinese text')}
   ${EN()?'':sw('showR','한글 음(읽는 법) 보이기','Show Korean reading')}
   ${sw('showZ','현대적 풀이 보이기','Show modern interpretation')}
@@ -283,6 +295,8 @@ document.addEventListener('click',e=>{
   const sy=e.target.closest('[data-say]');if(sy){const k=sy.dataset.say;if(playing===k){ttsStop()}else{const [ci,ii]=k.split('-').map(Number);startItem(ci,ii,false)}return}
   const pa=e.target.closest('[data-playall]');if(pa){const ci=+pa.dataset.playall;startItem(ci,0,true);chainCh=ci;return}
   if(e.target.closest('#ttsstop')){ttsStop();return}
+  const sm=e.target.closest('[data-sample]');if(sm){sample(sm.dataset.sample);return}
+  const pt=e.target.closest('[data-pitch]');if(pt){S.pitch=+pt.dataset.pitch;saveSet();document.querySelectorAll('[data-pitch]').forEach(b=>b.classList.toggle('on',b===pt));return}
   const rt=e.target.closest('[data-rate]');if(rt){S.rate=+rt.dataset.rate;saveSet();document.querySelectorAll('[data-rate]').forEach(b=>b.classList.toggle('on',b===rt));return}
   const g=e.target.closest('[data-go]');if(g&&!g.disabled){location.hash=g.dataset.go;return}
   const f=e.target.closest('[data-fav]');if(f){const k=f.dataset.fav;if(favs.has(k)){favs.delete(k);toast(L('즐겨찾기에서 뺐습니다','Removed from Saved'))}else{favs.add(k);toast(L('즐겨찾기에 담았습니다','Saved'))}
@@ -291,7 +305,7 @@ document.addEventListener('click',e=>{
   const fs=e.target.closest('[data-fs]');if(fs){S.fs=+fs.dataset.fs;saveSet();document.querySelectorAll('[data-fs]').forEach(b=>b.classList.toggle('on',b===fs));return}
   if(e.target.closest('#rnd,#rnd2')){const x=ALL[Math.floor(Math.random()*ALL.length)];location.hash=`#/ch/${x.ci}/${x.ii}`}
 });
-document.addEventListener('change',e=>{const k=e.target.dataset&&e.target.dataset.k;if(k){S[k]=e.target.checked;saveSet()}});
+document.addEventListener('change',e=>{const vl=e.target.dataset&&e.target.dataset.voice;if(vl){if(vl=='ko')S.voiceKo=e.target.value;else S.voiceEn=e.target.value;saveSet();sample(vl);return}const k=e.target.dataset&&e.target.dataset.k;if(k){S[k]=e.target.checked;saveSet()}});
 $('#back').onclick=()=>{if(history.length>1)history.back();else location.hash='#/'};
 window.addEventListener('hashchange',route);
 route();
